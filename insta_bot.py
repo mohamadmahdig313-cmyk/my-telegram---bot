@@ -1,12 +1,11 @@
 # -*- coding: utf-8 -*-
-import os, re, json, time, threading, subprocess
+import os, re, json, time, threading, subprocess, urllib.request
 import http.server
 import socketserver
 import requests, yt_dlp
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 API_URL = f"https://api.splus.ir/bot{BOT_TOKEN}" 
-
 DOWNLOAD_DIR = "/tmp/yt_downloads" 
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
@@ -38,6 +37,18 @@ def run_dummy_server():
     handler = http.server.SimpleHTTPRequestHandler
     with socketserver.TCPServer(("", port), handler) as httpd:
         httpd.serve_forever()
+
+def keep_alive_worker():
+    """هر ۱۴ دقیقه یک بار به خود سرور درخواست می‌فرستد تا نخوابد"""
+    time.sleep(60)
+    url = os.environ.get("RENDER_EXTERNAL_URL", "https://my-telegram-bot-2v2u.onrender.com")
+    while True:
+        try:
+            print("[keep-alive] Pinging self to stay awake...")
+            urllib.request.urlopen(url, timeout=10)
+        except Exception as e:
+            print(f"[keep-alive] Ping failed: {e}")
+        time.sleep(14 * 60)
 
 def get_name(c): return (c.get("first_name") or c.get("username") or "دوست عزیز").strip()
 
@@ -331,6 +342,7 @@ def handle_message(msg):
 def main():
     print("🤖 بات آماده است...")
     threading.Thread(target=run_dummy_server, daemon=True).start()
+    threading.Thread(target=keep_alive_worker, daemon=True).start()
     
     res = requests.get(f"{API_URL}/getUpdates", params={"offset": -1, "timeout": 0}).json()
     offset = (res["result"][-1]["update_id"] + 1) if (res.get("ok") and res.get("result")) else None
