@@ -4,12 +4,12 @@ import http.server
 import socketserver
 import requests, yt_dlp
 
-# توکن رو از محیط Render می‌خونه
+# توکن از تنظیمات Render خونده میشه
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
-# آدرس API تلگرام (اگر خواستی سروش بشه، این رو به api.splus.ir تغییر بده)
-API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}" 
+# آدرس سروش
+API_URL = f"https://api.splus.ir/bot{BOT_TOKEN}" 
 
-DOWNLOAD_DIR = "/tmp/yt_downloads" # برای سرور Render بهتره تو پوشه tmp باشه
+DOWNLOAD_DIR = "/tmp/yt_downloads" 
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 YT_RE = re.compile(r'(https?://)?(www\.)?(youtube\.com/(watch\?v=|shorts/)|youtu\.be/)[\w-]+')
