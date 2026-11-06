@@ -6,35 +6,43 @@ RUN apt-get update && apt-get install -y \
     nodejs \
     npm \
     curl \
-    wget \
     unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# نصب ابزارهای WARP (wgcf و wireproxy)
-RUN wget -O /usr/local/bin/wgcf https://github.com/ViRb3/wgcf/releases/download/v2.2.22/wgcf_2.2.22_linux_amd64 && \
-    chmod +x /usr/local/bin/wgcf
-
-RUN wget -O /tmp/wireproxy.tar.gz https://github.com/pufferffish/wireproxy/releases/download/v1.0.9/wireproxy_linux_amd64.tar.gz && \
-    tar -xzf /tmp/wireproxy.tar.gz -C /usr/local/bin/ wireproxy && \
-    chmod +x /usr/local/bin/wireproxy
+# نصب هسته Xray (فیلترشکن)
+RUN curl -L -o xray.zip https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip && \
+    unzip xray.zip && \
+    chmod +x xray && \
+    mv xray /usr/local/bin/
 
 WORKDIR /app
-
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
 COPY . .
 
-# ساخت اسکریپت راه‌اندازی برای فعال‌سازی خودکار WARP قبل از روشن شدن ربات
-RUN echo '#!/bin/bash\n\
-if [ ! -f wgcf-account.toml ]; then\n\
-    wgcf register --accept-tos\n\
-fi\n\
-wgcf generate\n\
-echo -e "\n[Socks5]\nBindAddress = 127.0.0.1:25344" >> wgcf-profile.conf\n\
-wireproxy -c wgcf-profile.conf &\n\
-sleep 3\n\
-python insta_bot.py\n\
-' > /start.sh && chmod +x /start.sh
+# ساخت فایل تنظیمات Xray با کانفیگ VLESS (WebSocket) جدید
+RUN echo '{\
+  "log": {"loglevel": "warning"},\
+  "inbounds": [{"port": 10809, "listen": "127.0.0.1", "protocol": "socks", "settings": {"udp": true}}],\
+  "outbounds": [\
+    {\
+      "protocol": "vless",\
+      "settings": {\
+        "vnext": [{\
+          "address": "146.103.118.189",\
+          "port": 443,\
+          "users": [{"id": "ce698f0c-a8ec-474a-b5d8-3be8032deeb8", "encryption": "none"}]\
+        }]\
+      },\
+      "streamSettings": {\
+        "network": "ws",\
+        "security": "tls",\
+        "tlsSettings": {"serverName": "nl2.574ck.xyz", "allowInsecure": false, "fingerprint": "firefox"},\
+        "wsSettings": {"path": "/574ck-finland", "headers": {"Host": "nl2.574ck.xyz"}}\
+      }\
+    }\
+  ]\
+}' > config.json
 
-CMD ["/start.sh"]
+# اجرای فیلترشکن Xray در پس‌زمینه و سپس اجرای ربات
+CMD xray run -c config.json & python insta_bot.py
