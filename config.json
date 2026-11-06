@@ -1,11 +1,20 @@
 {
-  "log": { "loglevel": "warning" },
+  "log": {
+    "loglevel": "warning"
+  },
   "inbounds": [
     {
       "port": 10809,
       "listen": "127.0.0.1",
       "protocol": "socks",
-      "settings": { "udp": true }
+      "settings": {
+        "udp": true,
+        "auth": "noauth"
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls"]
+      }
     }
   ],
   "outbounds": [
@@ -19,7 +28,8 @@
             "users": [
               {
                 "id": "ce698f0c-a8ec-474a-b5d8-3be8032deeb8",
-                "encryption": "none"
+                "encryption": "none",
+                "flow": ""
               }
             ]
           }
@@ -31,13 +41,30 @@
         "tlsSettings": {
           "serverName": "nl2.574ck.xyz",
           "allowInsecure": false,
-          "fingerprint": "firefox"
+          "fingerprint": "chrome"
         },
         "wsSettings": {
           "path": "/574ck-finland",
-          "headers": { "Host": "nl2.574ck.xyz" }
+          "headers": {
+            "Host": "nl2.574ck.xyz"
+          }
         }
-      }
+      },
+      "tag": "proxy"
+    },
+    {
+      "protocol": "freedom",
+      "tag": "direct"
     }
-  ]
+  ],
+  "routing": {
+    "domainStrategy": "AsIs",
+    "rules": [
+      {
+        "type": "field",
+        "outboundTag": "proxy",
+        "network": "tcp,udp"
+      }
+    ]
+  }
 }
