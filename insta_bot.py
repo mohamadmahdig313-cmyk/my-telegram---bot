@@ -4,10 +4,12 @@ import http.server
 import socketserver
 import requests, yt_dlp
 
-TOKEN_FILE = os.path.expanduser("~/bot_token")
-DOWNLOAD_DIR = os.path.expanduser("~/yt_downloads")
-BOT_TOKEN = open(TOKEN_FILE).read().strip() if os.path.exists(TOKEN_FILE) else os.environ.get("BOT_TOKEN", "")
-API_URL = f"https://api.splus.ir/bot{BOT_TOKEN}" 
+# توکن رو از محیط Render می‌خونه
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+# آدرس API تلگرام (اگر خواستی سروش بشه، این رو به api.splus.ir تغییر بده)
+API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}" 
+
+DOWNLOAD_DIR = "/tmp/yt_downloads" # برای سرور Render بهتره تو پوشه tmp باشه
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 YT_RE = re.compile(r'(https?://)?(www\.)?(youtube\.com/(watch\?v=|shorts/)|youtu\.be/)[\w-]+')
@@ -154,7 +156,7 @@ def fetch_info(chat_id, url, name):
             "quiet": True, "noplaylist": True, "socket_timeout": 15, "retries": 2,
             "js_runtimes": {"node": {}},
             "remote_components": ["ejs:github"],
-            "extractor_args": {"youtube": {"player_client": ["web"]}},
+            "extractor_args": {"youtube": {"player_client": ["ios", "android", "tv"]}},
         }
         with yt_dlp.YoutubeDL(opts_check) as ydl: info = ydl.extract_info(url, download=False)
         pending_links[chat_id] = {"url": url, "title": info.get("title", "بدون عنوان"), "thumb_url": info.get("thumbnail")}
@@ -209,7 +211,7 @@ def run_download(chat_id, url, format_str, is_audio_only):
         "quiet": True, "noplaylist": True, "progress_hooks": [hook], "logger": YtdlpLogger(job),
         "js_runtimes": {"node": {}},
         "remote_components": ["ejs:github"],
-        "extractor_args": {"youtube": {"player_client": ["web"]}},
+        "extractor_args": {"youtube": {"player_client": ["ios", "android", "tv"]}},
         "retries": 5, "socket_timeout": 30, "merge_output_format": "mp4",
     }
     if is_audio_only: opts["postprocessors"] = [{"key": "FFmpegExtractAudio", "preferredcodec": "m4a"}]
