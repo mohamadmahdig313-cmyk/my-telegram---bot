@@ -49,8 +49,13 @@ FORMATS = {
 def kb_inline_main_menu():
     return {"inline_keyboard": [[{"text": "📥 دانلود از یوتیوب", "callback_data": "menu_yt"}], [{"text": "📥 دانلود از اینستاگرام", "callback_data": "menu_ig"}]]}
 
-def kb_inline_video_quality():
-    return {"inline_keyboard": [[{"text": "🎬 360p", "callback_data": "qv|360"}, {"text": "🎬 480p", "callback_data": "qv|480"}], [{"text": "🎬 720p", "callback_data": "qv|720"}, {"text": "🎬 1080p", "callback_data": "qv|1080"}], [{"text": "🎵 فقط صدا", "callback_data": "qv|audio"}]]}
+def kb_inline_video_quality(sizes=None):
+    if not sizes: sizes = {}
+    return {"inline_keyboard": [
+        [{"text": f"🎬 360p {sizes.get('360p', '')}", "callback_data": "qv|360"}, {"text": f"🎬 480p {sizes.get('480p', '')}", "callback_data": "qv|480"}],
+        [{"text": f"🎬 720p {sizes.get('720p', '')}", "callback_data": "qv|720"}, {"text": f"🎬 1080p {sizes.get('1080p', '')}", "callback_data": "qv|1080"}],
+        [{"text": f"🎵 فقط صدا {sizes.get('audio', '')}", "callback_data": "qv|audio"}]
+    ]}
 
 def kb_inline_image_quality():
     return {"inline_keyboard": [[{"text": "🌟 کیفیت اصلی", "callback_data": "qi|0"}], [{"text": "📱 1080p", "callback_data": "qi|1080"}, {"text": "💻 720p", "callback_data": "qi|720"}], [{"text": "📉 480p", "callback_data": "qi|480"}]]}
@@ -152,12 +157,38 @@ def fetch_info(chat_id, url, name):
             "proxy": XRAY_PROXY,  # <--- استفاده از فیلترشکن Xray
         }
         with yt_dlp.YoutubeDL(opts_check) as ydl: info = ydl.extract_info(url, download=False)
+        
+        # ================= محاسبه حجم فایل‌ها =================
+        formats = info.get('formats', [])
+        sizes = {"360p": "", "480p": "", "720p": "", "1080p": "", "audio": ""}
+        
+        def fmt_size(b):
+            if not b: return ""
+            return f"({b / (1024 * 1024):.1f}MB)"
+
+        # پیدا کردن بهترین فرمت صدا
+        best_audio = next((f for f in reversed(formats) if f.get('acodec') != 'none' and f.get('vcodec') == 'none'), None)
+        a_size = (best_audio.get('filesize') or best_audio.get('filesize_approx')) if best_audio else 0
+        if a_size: sizes["audio"] = fmt_size(a_size)
+
+        for q in [360, 480, 720, 1080]:
+            # پیدا کردن فرمت ویدیو
+            v_fmt = next((f for f in reversed(formats) if f.get('height') == q and f.get('vcodec') != 'none'), None)
+            if v_fmt:
+                v_size = v_fmt.get('filesize') or v_fmt.get('filesize_approx') or 0
+                if v_size:
+                    total_size = v_size + (a_size if a_size else 0)
+                    sizes[f"{q}p"] = fmt_size(total_size)
+        # =======================================================
+
         pending_links[chat_id] = {"url": url, "title": info.get("title", "بدون عنوان"), "thumb_url": info.get("thumbnail")}
         requests.post(f"{API_URL}/deleteMessage", data={"chat_id": chat_id, "message_id": msg_id})
-        caption = f"🎬 **{info.get('title')}**\n\n👇 کیفیت مورد نظر را انتخاب کنید:"
+        
+        caption = f"🎬 **{info.get('title')}**\n\n👇 کیفیت مورد نظر را انتخاب کنید:\n*(حجم‌های نوشته شده تقریبی هستند)*"
         if info.get("thumbnail"): requests.post(f"{API_URL}/sendPhoto", data={"chat_id": chat_id, "photo": info.get("thumbnail"), "caption": caption}, timeout=30)
         else: send_message(chat_id, caption)
-        send_message(chat_id, "منتظر انتخاب شما هستم...", kb=kb_inline_video_quality())
+        
+        send_message(chat_id, "منتظر انتخاب شما هستم...", kb=kb_inline_video_quality(sizes))
     except Exception as e:
         edit_message(chat_id, msg_id, f"⚠️ خطا: {e}")
 
