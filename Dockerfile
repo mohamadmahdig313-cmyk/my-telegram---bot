@@ -1,24 +1,21 @@
 FROM python:3.10-slim
 
-# نصب پیش‌نیازها
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
-    nodejs \
-    npm \
     curl \
     unzip \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# نصب هسته Xray (فیلترشکن)
-RUN curl -L -o xray.zip https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip && \
-    unzip xray.zip && \
-    chmod +x xray && \
-    mv xray /usr/local/bin/
+RUN curl -L -o /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip \
+    && unzip /tmp/xray.zip -d /tmp/xray \
+    && mv /tmp/xray/xray /usr/local/bin/ \
+    && chmod +x /usr/local/bin/xray \
+    && rm -rf /tmp/xray /tmp/xray.zip
 
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
-# اجرای فیلترشکن Xray با فایل کانفیگ و سپس ربات
-CMD xray run -c config.json & python insta_bot.py
+CMD ["sh", "-c", "xray run -c config.json & sleep 3 && python insta_bot.py"]
