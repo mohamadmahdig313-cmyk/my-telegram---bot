@@ -26,7 +26,6 @@ DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 XRAY_PROXY = "socks5://127.0.0.1:10809"
 
-# لاگ
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -34,7 +33,6 @@ logging.basicConfig(
 )
 log = logging.getLogger("bot")
 
-# الگوهای لینک
 YT_RE = re.compile(
     r"(https?://)?(www\.)?(youtube\.com/(watch\?v=|shorts/)|youtu\.be/)[\w-]+",
     re.IGNORECASE
@@ -44,7 +42,6 @@ IG_RE = re.compile(
     re.IGNORECASE
 )
 
-# state مشترک با قفل
 _lock = threading.RLock()
 jobs = {}
 pending_links = {}
@@ -60,7 +57,6 @@ FORMATS = {
     "🎵 فقط صدا": "bestaudio/best",
 }
 
-# ================= کیبوردها =================
 def kb_inline_main_menu():
     return {
         "inline_keyboard": [
@@ -122,7 +118,6 @@ def kb_inline_rating():
         ]
     }
 
-# ================= API =================
 def api_post(method, data=None, files=None, timeout=120):
     try:
         if files:
@@ -177,7 +172,6 @@ def delete_message(chat_id, mid):
         except Exception:
             pass
 
-# ================= ارسال فایل (با پاکسازی امن) =================
 def perform_send(chat_id, path, title, mode, is_video, is_audio):
     path = Path(path)
     try:
@@ -277,7 +271,6 @@ def perform_send(chat_id, path, title, mode, is_video, is_audio):
         except Exception as e:
             log.warning(f"cleanup: {e}")
 
-# ================= ابزارهای کمکی =================
 def get_name(c):
     return (c.get("first_name") or c.get("username") or "دوست عزیز").strip()
 
@@ -300,7 +293,6 @@ def apply_image_quality(url, size_str):
         return re.sub(r"=w\d+", f"=w{size_str}", url)
     return url + f"=s{size_str}" if "?" not in url else url + f"&size=s{size_str}"
 
-# ================= Job =================
 class Cancelled(Exception):
     pass
 
@@ -345,7 +337,6 @@ class YtdlpLogger:
     def error(self, msg):
         self.job.check()
 
-# ================= دانلود =================
 def fetch_info(chat_id, url, name):
     msg_id = send_message(chat_id, f"🔍 {name} جان، در حال بررسی لینک...")
     try:
@@ -596,7 +587,6 @@ def run_download(chat_id, url, format_str, is_audio_only):
                 "is_audio": False,
             }
 
-# ================= هندلرها =================
 def handle_callback(cb):
     try:
         chat_id = cb["message"]["chat"]["id"]
@@ -620,4 +610,13 @@ def handle_callback(cb):
             "1080": "🎬 1080p",
             "audio": "🎵 فقط صدا",
         }
-        with _
+        with _lock:
+            info = pending_links.pop(chat_id, None)
+        if info and q in q_map:
+            job = Job()
+            with _lock:
+                jobs[chat_id] = job
+            job.message_id = send_message(chat_id, f"⏳ دانلود {q_map[q]} شروع شد...")
+            threading.Thread(
+                target=progress_loop, args=(chat_id, job), daemon=True
+            ).start()
