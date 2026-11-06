@@ -4,13 +4,14 @@ import http.server
 import socketserver
 import requests, yt_dlp
 
-# دریافت توکن از محیط Render
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
-# آدرس سروش پلاس
 API_URL = f"https://api.splus.ir/bot{BOT_TOKEN}" 
 
 DOWNLOAD_DIR = "/tmp/yt_downloads" 
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+# تنظیمات پروکسی WARP (پورت 25344)
+WARP_PROXY = "socks5://127.0.0.1:25344"
 
 YT_RE = re.compile(r'(https?://)?(www\.)?(youtube\.com/(watch\?v=|shorts/)|youtu\.be/)[\w-]+')
 IG_RE = re.compile(r'(https?://)?(www\.)?(instagram\.com/(p|reel|reels|tv)/[\w-]+)')
@@ -25,15 +26,13 @@ def run_dummy_server():
         httpd.serve_forever()
 
 def keep_alive_worker():
-    """هر ۱۴ دقیقه یک بار به خود سرور درخواست می‌فرستد تا نخوابد"""
     time.sleep(60)
     url = os.environ.get("RENDER_EXTERNAL_URL", "https://my-telegram-bot-2v2u.onrender.com")
     while True:
         try:
-            print("[keep-alive] Pinging self to stay awake...")
             urllib.request.urlopen(url, timeout=10)
-        except Exception as e:
-            print(f"[keep-alive] Ping failed: {e}")
+        except Exception:
+            pass
         time.sleep(14 * 60)
 
 def get_name(c): return (c.get("first_name") or c.get("username") or "دوست عزیز").strip()
@@ -46,37 +45,21 @@ FORMATS = {
     "🎵 فقط صدا": "bestaudio/best",
 }
 
-# ================= کیبوردهای شیشه‌ای =================
+# ================= کیبوردها =================
 def kb_inline_main_menu():
-    return {"inline_keyboard": [
-        [{"text": "📥 دانلود از یوتیوب", "callback_data": "menu_yt"}],
-        [{"text": "📥 دانلود از اینستاگرام", "callback_data": "menu_ig"}]
-    ]}
+    return {"inline_keyboard": [[{"text": "📥 دانلود از یوتیوب", "callback_data": "menu_yt"}], [{"text": "📥 دانلود از اینستاگرام", "callback_data": "menu_ig"}]]}
 
 def kb_inline_video_quality():
-    return {"inline_keyboard": [
-        [{"text": "🎬 360p", "callback_data": "qv|360"}, {"text": "🎬 480p", "callback_data": "qv|480"}],
-        [{"text": "🎬 720p", "callback_data": "qv|720"}, {"text": "🎬 1080p", "callback_data": "qv|1080"}],
-        [{"text": "🎵 فقط صدا", "callback_data": "qv|audio"}]
-    ]}
+    return {"inline_keyboard": [[{"text": "🎬 360p", "callback_data": "qv|360"}, {"text": "🎬 480p", "callback_data": "qv|480"}], [{"text": "🎬 720p", "callback_data": "qv|720"}, {"text": "🎬 1080p", "callback_data": "qv|1080"}], [{"text": "🎵 فقط صدا", "callback_data": "qv|audio"}]]}
 
 def kb_inline_image_quality():
-    return {"inline_keyboard": [
-        [{"text": "🌟 کیفیت اصلی", "callback_data": "qi|0"}],
-        [{"text": "📱 1080p", "callback_data": "qi|1080"}, {"text": "💻 720p", "callback_data": "qi|720"}],
-        [{"text": "📉 480p", "callback_data": "qi|480"}]
-    ]}
+    return {"inline_keyboard": [[{"text": "🌟 کیفیت اصلی", "callback_data": "qi|0"}], [{"text": "📱 1080p", "callback_data": "qi|1080"}, {"text": "💻 720p", "callback_data": "qi|720"}], [{"text": "📉 480p", "callback_data": "qi|480"}]]}
 
 def kb_inline_send_choice(f_type):
-    return {"inline_keyboard": [
-        [{"text": "🎬 ارسال مستقیم", "callback_data": f"send|direct|{f_type}"}, {"text": "📁 ارسال فایل", "callback_data": f"send|file|{f_type}"}]
-    ]}
+    return {"inline_keyboard": [[{"text": "🎬 ارسال مستقیم", "callback_data": f"send|direct|{f_type}"}, {"text": "📁 ارسال فایل", "callback_data": f"send|file|{f_type}"}]]}
 
 def kb_inline_rating():
-    return {"inline_keyboard": [
-        [{"text": "1 ⭐", "callback_data": "rate|1"}, {"text": "2 ⭐", "callback_data": "rate|2"}, {"text": "3 ⭐", "callback_data": "rate|3"}],
-        [{"text": "4 ⭐", "callback_data": "rate|4"}, {"text": "5 ⭐", "callback_data": "rate|5"}]
-    ]}
+    return {"inline_keyboard": [[{"text": "1 ⭐", "callback_data": "rate|1"}, {"text": "2 ⭐", "callback_data": "rate|2"}, {"text": "3 ⭐", "callback_data": "rate|3"}], [{"text": "4 ⭐", "callback_data": "rate|4"}, {"text": "5 ⭐", "callback_data": "rate|5"}]]}
 
 # ================= API =================
 def api_post(method, data=None, files=None, timeout=120):
@@ -166,8 +149,7 @@ def fetch_info(chat_id, url, name):
     try:
         opts_check = {
             "quiet": True, "noplaylist": True, "socket_timeout": 15, "retries": 2,
-            "extractor_args": {"youtube": {"player_client": ["tv", "web_embedded", "ios"]}},
-            "nocheckcertificate": True,
+            "proxy": WARP_PROXY,  # <--- استفاده از WARP
         }
         with yt_dlp.YoutubeDL(opts_check) as ydl: info = ydl.extract_info(url, download=False)
         pending_links[chat_id] = {"url": url, "title": info.get("title", "بدون عنوان"), "thumb_url": info.get("thumbnail")}
@@ -220,8 +202,7 @@ def run_download(chat_id, url, format_str, is_audio_only):
     opts = {
         "outtmpl": os.path.join(user_dir, "%(id)s.%(ext)s"), "format": format_str,
         "quiet": True, "noplaylist": True, "progress_hooks": [hook], "logger": YtdlpLogger(job),
-        "extractor_args": {"youtube": {"player_client": ["tv", "web_embedded", "ios"]}},
-        "nocheckcertificate": True,
+        "proxy": WARP_PROXY,  # <--- استفاده از WARP
         "retries": 5, "socket_timeout": 30, "merge_output_format": "mp4",
     }
     if is_audio_only: opts["postprocessors"] = [{"key": "FFmpegExtractAudio", "preferredcodec": "m4a"}]
