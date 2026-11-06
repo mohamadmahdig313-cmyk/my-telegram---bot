@@ -4,27 +4,13 @@ import http.server
 import socketserver
 import requests, yt_dlp
 
+# دریافت توکن از محیط Render
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+# آدرس سروش پلاس
 API_URL = f"https://api.splus.ir/bot{BOT_TOKEN}" 
+
 DOWNLOAD_DIR = "/tmp/yt_downloads" 
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-
-# ============ ذخیره کوکی‌های یوتیوب ============
-COOKIES_TEXT = """# Netscape HTTP Cookie File
-# https://curl.haxx.se/rfc/cookie_spec.html
-# This is a generated file! Do not edit.
-
-.youtube.com	TRUE	/	TRUE	1793956462	GPS	1
-.youtube.com	TRUE	/	TRUE	1828514664	PREF	tz=Asia.Tehran
-.youtube.com	TRUE	/	TRUE	1809506660	__Secure-YNID	CtoBCAUSjAEBDB6PDGUhWc-ZtDnsfYrsPq2vaV91yQtL4tIoPrzmw9nFkJIilbfPiP8VZJNfRG9KyXLc8HeGGIT81kbNeSokZd2liXw99clc2p9HgE6KfQ5GAZAo_VGQpayQzxMTnTEQURG-F7yLymhy3NI-LmJ4SW_aW-Iaid5QZGbZexFZyafjGbtc_nO-38vLjygFMkUBHFj1akaZgN-C1NVOiXyHMcusqQn4f8TY8bkX_huSIBcWiTsTJWxYJZMpfmWpTufNd0hCDDGTEZktLgQJ8sQf8CfxlQE
-.youtube.com	TRUE	/	TRUE	0	YSC	_gG-J_aOigU
-.youtube.com	TRUE	/	TRUE	1809506662	__Secure-ROLLOUT_TOKEN	CLu56JWm3bn7HxD1xfzy-fKXAxj1xfzy-fKXAw%3D%3D
-.youtube.com	TRUE	/	TRUE	1809506662	VISITOR_INFO1_LIVE	2LkXJhQ4Bl4
-.youtube.com	TRUE	/	TRUE	1809506662	VISITOR_PRIVACY_METADATA	CgJJUhIEGgAgNg%3D%3D"""
-
-with open("cookies.txt", "w", encoding="utf-8") as f:
-    f.write(COOKIES_TEXT)
-# ===============================================
 
 YT_RE = re.compile(r'(https?://)?(www\.)?(youtube\.com/(watch\?v=|shorts/)|youtu\.be/)[\w-]+')
 IG_RE = re.compile(r'(https?://)?(www\.)?(instagram\.com/(p|reel|reels|tv)/[\w-]+)')
@@ -180,8 +166,8 @@ def fetch_info(chat_id, url, name):
     try:
         opts_check = {
             "quiet": True, "noplaylist": True, "socket_timeout": 15, "retries": 2,
-            "cookiefile": "cookies.txt",
-            "extractor_args": {"youtube": {"player_client": ["web"]}},
+            "extractor_args": {"youtube": {"player_client": ["tv", "web_embedded", "ios"]}},
+            "nocheckcertificate": True,
         }
         with yt_dlp.YoutubeDL(opts_check) as ydl: info = ydl.extract_info(url, download=False)
         pending_links[chat_id] = {"url": url, "title": info.get("title", "بدون عنوان"), "thumb_url": info.get("thumbnail")}
@@ -234,8 +220,8 @@ def run_download(chat_id, url, format_str, is_audio_only):
     opts = {
         "outtmpl": os.path.join(user_dir, "%(id)s.%(ext)s"), "format": format_str,
         "quiet": True, "noplaylist": True, "progress_hooks": [hook], "logger": YtdlpLogger(job),
-        "cookiefile": "cookies.txt",
-        "extractor_args": {"youtube": {"player_client": ["web"]}},
+        "extractor_args": {"youtube": {"player_client": ["tv", "web_embedded", "ios"]}},
+        "nocheckcertificate": True,
         "retries": 5, "socket_timeout": 30, "merge_output_format": "mp4",
     }
     if is_audio_only: opts["postprocessors"] = [{"key": "FFmpegExtractAudio", "preferredcodec": "m4a"}]
