@@ -10,8 +10,8 @@ API_URL = f"https://api.splus.ir/bot{BOT_TOKEN}"
 DOWNLOAD_DIR = "/tmp/yt_downloads" 
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# تنظیمات پروکسی WARP (پورت 25344)
-WARP_PROXY = "socks5://127.0.0.1:25344"
+# تنظیمات فیلترشکن Xray (پورت 10809)
+XRAY_PROXY = "socks5://127.0.0.1:10809"
 
 YT_RE = re.compile(r'(https?://)?(www\.)?(youtube\.com/(watch\?v=|shorts/)|youtu\.be/)[\w-]+')
 IG_RE = re.compile(r'(https?://)?(www\.)?(instagram\.com/(p|reel|reels|tv)/[\w-]+)')
@@ -149,7 +149,7 @@ def fetch_info(chat_id, url, name):
     try:
         opts_check = {
             "quiet": True, "noplaylist": True, "socket_timeout": 15, "retries": 2,
-            "proxy": WARP_PROXY,  # <--- استفاده از WARP
+            "proxy": XRAY_PROXY,  # <--- استفاده از فیلترشکن Xray
         }
         with yt_dlp.YoutubeDL(opts_check) as ydl: info = ydl.extract_info(url, download=False)
         pending_links[chat_id] = {"url": url, "title": info.get("title", "بدون عنوان"), "thumb_url": info.get("thumbnail")}
@@ -202,7 +202,7 @@ def run_download(chat_id, url, format_str, is_audio_only):
     opts = {
         "outtmpl": os.path.join(user_dir, "%(id)s.%(ext)s"), "format": format_str,
         "quiet": True, "noplaylist": True, "progress_hooks": [hook], "logger": YtdlpLogger(job),
-        "proxy": WARP_PROXY,  # <--- استفاده از WARP
+        "proxy": XRAY_PROXY,  # <--- استفاده از فیلترشکن Xray
         "retries": 5, "socket_timeout": 30, "merge_output_format": "mp4",
     }
     if is_audio_only: opts["postprocessors"] = [{"key": "FFmpegExtractAudio", "preferredcodec": "m4a"}]
