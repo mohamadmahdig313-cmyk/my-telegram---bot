@@ -14,6 +14,7 @@ IG_RE = re.compile(r'(https?://)?(www\.)?(instagram\.com/(p|reel|reels|tv)/[\w-]
 
 jobs, pending_links, pending_images, pending_send = {}, {}, {}, {}
 DL_SLOTS = threading.Semaphore(2)
+users_waiting_to_rate = set() # لیست افرادی که باید امتیاز بدن
 
 def run_dummy_server():
     port = int(os.environ.get("PORT", 8080))
@@ -79,7 +80,7 @@ def edit_message(chat_id, mid, text, kb=None):
 def answer_cb(cb_id, text):
     requests.post(f"{API_URL}/answerCallbackQuery", data={"callback_query_id": cb_id, "text": text})
 
-# ================= ارسال فایل (پشتیبانی از چند فایل) =================
+# ================= ارسال فایل =================
 def perform_send(chat_id, paths, title, mode, is_video, is_audio=False):
     try:
         for path in paths:
@@ -102,7 +103,10 @@ def perform_send(chat_id, paths, title, mode, is_video, is_audio=False):
                 else:
                     if mode == "direct": api_post("sendPhoto", {"chat_id": chat_id, "caption": title}, files={"photo": f}, timeout=120)
                     else: api_post("sendDocument", {"chat_id": chat_id, "caption": title}, files={"document": f}, timeout=120)
-    except Exception as e: print(f"perform_send error: {e}")
+        return True
+    except Exception as e: 
+        print(f"perform_send error: {e}")
+        return False
 
 def extract_image_from_post(url):
     try:
@@ -195,7 +199,7 @@ def run_download(chat_id, url, quality, is_audio_only):
     os.makedirs(user_dir, exist_ok=True)
 
     opts = {
-        "outtmpl": os.path.join(user_dir, "%(id)s_%(autonumber)s.%(ext)s"), # شماره‌گذاری خودکار برای آلبوم‌ها
+        "outtmpl": os.path.join(user_dir, "%(id)s_%(autonumber)s.%(ext)s"),
         "format": "best", 
         "quiet": True, "noplaylist": True, "progress_hooks": [hook], "logger": YtdlpLogger(job),
         "retries": 5, "socket_timeout": 30,
@@ -212,18 +216,14 @@ def run_download(chat_id, url, quality, is_audio_only):
     job.status = "finished"
     jobs.pop(chat_id, None)
     
-    # پیدا کردن تمام فایل‌های دانلود شده (برای آلبوم‌ها)
-    downloaded_files = sorted([os.path.join(user_dir, f) for f in os.listdir(user_dir) if f.startswith(info.get("id"))])
-    
+    downloaded_files = sorted([os.path.join(user_dir, f) for f in os.listdir(user_dir) if f.startswith(info.get("id")) and not f.endswith(".part")])
     if not downloaded_files:
         return send_message(chat_id, "❌ فایلی پیدا نشد.")
     
     job.title = info.get("title", "فایل اینستاگرام")
     final_paths = []
     
-    # پردازش فایل‌ها (اگر صدا یا کیفیت خاص خواسته شده بود)
     for original_path in downloaded_files:
-        if original_path.endswith(".part"): continue
         is_vid = original_path.endswith((".mp4", ".mkv", ".webm"))
         
         if is_audio_only and is_vid:
@@ -284,20 +284,39 @@ def handle_callback(cb):
         if chat_id in pending_send:
             p = pending_send.pop(chat_id)
             answer_cb(cb["id"], "در حال ارسال...")
-            threading.Thread(target=perform_send, args=(chat_id, p["paths"], p["title"], mode, p["is_video"], p.get("is_audio", False)), daemon=True).start()
-            time.sleep(1)
-            send_message(chat_id, "✨ فایل‌ها ارسال شدند!\n\n⭐ کیفیت کار بات را ۱ تا ۵ امتیاز دهید:", kb=kb_inline_rating())
-            try: 
-                for path in p["paths"]: os.remove(path)
-                os.rmdir(os.path.dirname(p["paths"][0]))
-            except: pass
+            
+            # ارسال در ترد جداگانه و سپس درخواست نظرسنجی
+            def send_and_prompt():
+                success = perform_send(chat_id, p["paths"], p["title"], mode, p["is_video"], p.get("is_audio", False))
+                try: 
+                    for path in p["paths"]: os.remove(path)
+                    os.rmdir(os.path.dirname(p["paths"][0]))
+                except: pass
+
+                if success:
+                    users_waiting_to_rate.add(chat_id) # اضافه کردن به لیست انتظار
+                    send_message(chat_id, "✨ فایل(ها) ارسال شد(ند)!\n\n⛔️ توجه: برای استفاده مجدد از ربات، باید به آن امتیاز دهید:", kb=kb_inline_rating())
+                else:
+                    send_message(chat_id, "⚠️ خطا در ارسال فایل توسط سرور. لطفاً دوباره تلاش کنید.")
+
+            threading.Thread(target=send_and_prompt, daemon=True).start()
+            
     elif data.startswith("rate|"):
         score = data.split("|")[1]
         answer_cb(cb["id"], "ممنون از امتیاز شما!")
-        edit_message(chat_id, mid, f"✅ امتیاز شما ({score} ⭐) ثبت شد! ممنون 🙏")
+        
+        if chat_id in users_waiting_to_rate:
+            users_waiting_to_rate.remove(chat_id) # حذف از لیست انتظار
+            
+        edit_message(chat_id, mid, f"✅ امتیاز شما ({score} ⭐) ثبت شد! حالا می‌توانید لینک بعدی را بفرستید. 🙏")
 
 def handle_message(msg):
     chat_id = msg["chat"]["id"]; name = get_name(msg["chat"]); text = msg.get("text", "").strip()
+
+    # ۱. بررسی اجباری بودن نظرسنجی
+    if chat_id in users_waiting_to_rate:
+        send_message(chat_id, "⛔️ شما باید ابتدا به ربات امتیاز دهید تا بتوانید دانلود بعدی را انجام دهید!", kb=kb_inline_rating())
+        return
 
     if text.startswith("/start") or text.startswith("/help"):
         send_message(chat_id, f"سلام {name} جان! 🌹✨\n\n🤖 من بات دانلودر اینستاگرام هستم!\nلطفاً یک گزینه را انتخاب کنید یا لینک خود را بفرستید:", kb=kb_inline_main_menu())
