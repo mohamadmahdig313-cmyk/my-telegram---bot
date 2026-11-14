@@ -10,7 +10,6 @@ API_URL = f"https://api.splus.ir/bot{BOT_TOKEN}"
 DOWNLOAD_DIR = "/tmp/ig_downloads" 
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# الگوی لینک اینستاگرام
 IG_RE = re.compile(r'(https?://)?(www\.)?(instagram\.com/(p|reel|reels|tv)/[\w-]+)')
 
 jobs, pending_links, pending_images, pending_send = {}, {}, {}, {}
@@ -38,8 +37,12 @@ def get_name(c): return (c.get("first_name") or c.get("username") or "دوست �
 def kb_inline_main_menu():
     return {"inline_keyboard": [[{"text": "📥 ارسال لینک اینستاگرام", "callback_data": "menu_ig"}]]}
 
+# منوی جدید برای ویدیو (اضافه شدن فقط صدا)
 def kb_inline_video_action():
-    return {"inline_keyboard": [[{"text": "📥 دانلود ویدیو", "callback_data": "qv|best"}]]}
+    return {"inline_keyboard": [
+        [{"text": "🎬 دانلود ویدیو (کیفیت اصلی)", "callback_data": "qv|best"}],
+        [{"text": "🎵 دانلود فقط صدا", "callback_data": "qv|audio"}]
+    ]}
 
 def kb_inline_image_quality():
     return {"inline_keyboard": [[{"text": "🌟 کیفیت اصلی", "callback_data": "qi|0"}], [{"text": "📱 1080p", "callback_data": "qi|1080"}, {"text": "💻 720p", "callback_data": "qi|720"}], [{"text": "📉 480p", "callback_data": "qi|480"}]]}
@@ -75,10 +78,22 @@ def edit_message(chat_id, mid, text, kb=None):
 def answer_cb(cb_id, text):
     requests.post(f"{API_URL}/answerCallbackQuery", data={"callback_query_id": cb_id, "text": text})
 
-def perform_send(chat_id, path, title, mode, is_video):
+def perform_send(chat_id, path, title, mode, is_video, is_audio=False):
     try:
         with open(path, "rb") as f:
-            if is_video:
+            if is_audio:
+                if mode == "direct":
+                    ogg_path = path.rsplit(".", 1)[0] + ".ogg"
+                    subprocess.run(["ffmpeg", "-y", "-i", path, "-ac", "1", "-ar", "48000", "-c:a", "libopus", "-b:a", "64k", ogg_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    if os.path.exists(ogg_path):
+                        with open(ogg_path, "rb") as af: res = api_post("sendVoice", {"chat_id": chat_id, "caption": title}, files={"voice": af}, timeout=300)
+                        try: os.remove(ogg_path)
+                        except: pass
+                        if res.get("ok"): return
+                    with open(path, "rb") as af: api_post("sendAudio", {"chat_id": chat_id, "caption": title}, files={"audio": af}, timeout=300)
+                else:
+                    with open(path, "rb") as af: api_post("sendDocument", {"chat_id": chat_id, "caption": title}, files={"document": af}, timeout=300)
+            elif is_video:
                 if mode == "direct": api_post("sendVideo", {"chat_id": chat_id, "caption": title, "supports_streaming": True}, files={"video": f}, timeout=600)
                 else: api_post("sendDocument", {"chat_id": chat_id, "caption": title}, files={"document": f}, timeout=600)
             else:
@@ -86,7 +101,6 @@ def perform_send(chat_id, path, title, mode, is_video):
                 else: api_post("sendDocument", {"chat_id": chat_id, "caption": title}, files={"document": f}, timeout=120)
     except Exception as e: print(f"perform_send error: {e}")
 
-# ================= استخراج عکس =================
 def extract_image_from_post(url):
     try:
         r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
@@ -120,20 +134,18 @@ class YtdlpLogger:
 def fetch_info(chat_id, url, name):
     msg_id = send_message(chat_id, f"🔍 {name} جان، در حال بررسی لینک اینستاگرام...")
     try:
-        # تلاش برای گرفتن به عنوان ویدیو
         opts_check = {"quiet": True, "noplaylist": True, "socket_timeout": 15, "retries": 2}
         with yt_dlp.YoutubeDL(opts_check) as ydl: info = ydl.extract_info(url, download=False)
         
         pending_links[chat_id] = {"url": url, "title": info.get("title", "ویدیوی اینستاگرام"), "thumb_url": info.get("thumbnail")}
         requests.post(f"{API_URL}/deleteMessage", data={"chat_id": chat_id, "message_id": msg_id})
         
-        caption = f"🎬 **{info.get('title', 'ویدیو')}**\n\n👇 برای دانلود کلیک کنید:"
+        caption = f"🎬 **{info.get('title', 'ویدیو')}**\n\n👇 نوع دانلود را انتخاب کنید:"
         if info.get("thumbnail"): requests.post(f"{API_URL}/sendPhoto", data={"chat_id": chat_id, "photo": info.get("thumbnail"), "caption": caption}, timeout=30)
         else: send_message(chat_id, caption)
         
         send_message(chat_id, "منتظر انتخاب شما هستم...", kb=kb_inline_video_action())
     except Exception as e:
-        # اگر ویدیو نبود، شاید پست عکس باشد
         img_url = extract_image_from_post(url)
         if img_url:
             pending_images[chat_id] = url
@@ -154,7 +166,7 @@ def process_image_download(chat_id, url, size_str, label):
         path = os.path.join(user_dir, "post_image.jpg")
         with open(path, "wb") as f: f.write(data)
         send_message(chat_id, f"✅ دانلود شد!\n🖼 **عکس ({label})**\n\nچطور بفرستم؟", kb=kb_inline_send_choice("photo"))
-        pending_send[chat_id] = {"path": path, "title": f"🖼 عکس ({label})", "is_video": False, "state": "ask_mode"}
+        pending_send[chat_id] = {"path": path, "title": f"🖼 عکس ({label})", "is_video": False, "is_audio": False, "state": "ask_mode"}
     except Exception as e: send_message(chat_id, f"❌ خطا: {e}")
 
 def progress_loop(chat_id, job):
@@ -171,7 +183,7 @@ def progress_loop(chat_id, job):
         if text != job.last_text: edit_message(chat_id, job.message_id, text); job.last_text = text
         time.sleep(1)
 
-def run_download(chat_id, url):
+def run_download(chat_id, url, is_audio_only):
     job = jobs.get(chat_id)
     if not job: return
     def hook(d): job.check(); job.progress = d
@@ -186,6 +198,9 @@ def run_download(chat_id, url):
         "retries": 5, "socket_timeout": 30, "merge_output_format": "mp4",
     }
     
+    if is_audio_only:
+        opts["postprocessors"] = [{"key": "FFmpegExtractAudio", "preferredcodec": "m4a"}]
+
     with DL_SLOTS:
         try:
             with yt_dlp.YoutubeDL(opts) as ydl: info = ydl.extract_info(url, download=True)
@@ -197,19 +212,24 @@ def run_download(chat_id, url):
     job.status = "finished"
     jobs.pop(chat_id, None)
     
-    files = [os.path.join(user_dir, f) for f in os.listdir(user_dir) if f.startswith(info.get("id")) and f.rsplit(".",1)[-1].lower() in ("mp4","mkv","webm","jpg","jpeg","png","webp")]
+    files = [os.path.join(user_dir, f) for f in os.listdir(user_dir) if f.startswith(info.get("id")) and f.rsplit(".",1)[-1].lower() in ("mp4","mkv","webm","m4a","mp3","jpg","jpeg","png","webp")]
     if not files: return send_message(chat_id, "❌ فایل پیدا نشد.")
     
     job.title = info.get("title", "فایل اینستاگرام")
     edit_message(chat_id, job.message_id, f"✅ دانلود شد 🎉")
     
     videos = [p for p in files if p.rsplit(".",1)[-1].lower() in ("mp4","mkv","webm")]
-    if videos:
+    audios = [p for p in files if p.rsplit(".",1)[-1].lower() in ("m4a","mp3")]
+    
+    if is_audio_only:
+        send_message(chat_id, f"🎵 **{job.title}**\n\nچطور بفرستم؟", kb=kb_inline_send_choice("audio"))
+        pending_send[chat_id] = {"path": audios[0] if audios else files[0], "title": job.title, "is_video": False, "is_audio": True, "state": "ask_mode"}
+    elif videos:
         send_message(chat_id, f"🎬 **{job.title}**\n\nچطور بفرستم؟", kb=kb_inline_send_choice("video"))
-        pending_send[chat_id] = {"path": videos[0], "title": job.title, "is_video": True, "state": "ask_mode"}
+        pending_send[chat_id] = {"path": videos[0], "title": job.title, "is_video": True, "is_audio": False, "state": "ask_mode"}
     else:
         send_message(chat_id, f"🖼 **{job.title}**\n\nچطور بفرستم؟", kb=kb_inline_send_choice("photo"))
-        pending_send[chat_id] = {"path": files[0], "title": job.title, "is_video": False, "state": "ask_mode"}
+        pending_send[chat_id] = {"path": files[0], "title": job.title, "is_video": False, "is_audio": False, "state": "ask_mode"}
 
 def handle_callback(cb):
     try:
@@ -220,11 +240,14 @@ def handle_callback(cb):
         answer_cb(cb["id"], "لینک اینستاگرام را بفرستید")
         edit_message(chat_id, mid, "📸 لطفاً لینک پست، ریلز یا ویدیوی اینستاگرام خود را ارسال کنید:")
     elif data.startswith("qv|"):
+        q = data.split("|")[1]
         if chat_id in pending_links:
             info = pending_links.pop(chat_id); jobs[chat_id] = Job()
-            jobs[chat_id].message_id = send_message(chat_id, "⏳ دانلود ویدیو شروع شد...")
+            is_audio = (q == "audio")
+            text_start = "⏳ دانلود صدا شروع شد..." if is_audio else "⏳ دانلود ویدیو شروع شد..."
+            jobs[chat_id].message_id = send_message(chat_id, text_start)
             threading.Thread(target=progress_loop, args=(chat_id, jobs[chat_id]), daemon=True).start()
-            threading.Thread(target=run_download, args=(chat_id, info["url"]), daemon=True).start()
+            threading.Thread(target=run_download, args=(chat_id, info["url"], is_audio), daemon=True).start()
             answer_cb(cb["id"], "شروع دانلود")
     elif data.startswith("qi|"):
         q = data.split("|")[1]
@@ -239,7 +262,7 @@ def handle_callback(cb):
         if chat_id in pending_send:
             p = pending_send.pop(chat_id)
             answer_cb(cb["id"], "در حال ارسال...")
-            threading.Thread(target=perform_send, args=(chat_id, p["path"], p["title"], mode, p["is_video"]), daemon=True).start()
+            threading.Thread(target=perform_send, args=(chat_id, p["path"], p["title"], mode, p["is_video"], p.get("is_audio", False)), daemon=True).start()
             time.sleep(1)
             send_message(chat_id, "✨ فایل ارسال شد!\n\n⭐ کیفیت کار بات را ۱ تا ۵ امتیاز دهید:", kb=kb_inline_rating())
             try: 
