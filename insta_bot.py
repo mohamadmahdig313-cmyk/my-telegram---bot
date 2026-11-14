@@ -37,11 +37,12 @@ def get_name(c): return (c.get("first_name") or c.get("username") or "دوست �
 def kb_inline_main_menu():
     return {"inline_keyboard": [[{"text": "📥 ارسال لینک اینستاگرام", "callback_data": "menu_ig"}]]}
 
-# منوی جدید برای ویدیو (اضافه شدن فقط صدا)
-def kb_inline_video_action():
+# منوی کیفیت (حالا شامل 360، 480، 720، 1080 و صدا)
+def kb_inline_video_quality():
     return {"inline_keyboard": [
-        [{"text": "🎬 دانلود ویدیو (کیفیت اصلی)", "callback_data": "qv|best"}],
-        [{"text": "🎵 دانلود فقط صدا", "callback_data": "qv|audio"}]
+        [{"text": "🎬 360p", "callback_data": "qv|360"}, {"text": "🎬 480p", "callback_data": "qv|480"}],
+        [{"text": "🎬 720p", "callback_data": "qv|720"}, {"text": "🎬 1080p", "callback_data": "qv|1080"}],
+        [{"text": "🎵 فقط صدا", "callback_data": "qv|audio"}]
     ]}
 
 def kb_inline_image_quality():
@@ -140,11 +141,11 @@ def fetch_info(chat_id, url, name):
         pending_links[chat_id] = {"url": url, "title": info.get("title", "ویدیوی اینستاگرام"), "thumb_url": info.get("thumbnail")}
         requests.post(f"{API_URL}/deleteMessage", data={"chat_id": chat_id, "message_id": msg_id})
         
-        caption = f"🎬 **{info.get('title', 'ویدیو')}**\n\n👇 نوع دانلود را انتخاب کنید:"
+        caption = f"🎬 **{info.get('title', 'ویدیو')}**\n\n👇 کیفیت مورد نظر را انتخاب کنید (سرور کمی زمان برای فشرده‌سازی نیاز دارد):"
         if info.get("thumbnail"): requests.post(f"{API_URL}/sendPhoto", data={"chat_id": chat_id, "photo": info.get("thumbnail"), "caption": caption}, timeout=30)
         else: send_message(chat_id, caption)
         
-        send_message(chat_id, "منتظر انتخاب شما هستم...", kb=kb_inline_video_action())
+        send_message(chat_id, "منتظر انتخاب شما هستم...", kb=kb_inline_video_quality())
     except Exception as e:
         img_url = extract_image_from_post(url)
         if img_url:
@@ -172,7 +173,7 @@ def process_image_download(chat_id, url, size_str, label):
 def progress_loop(chat_id, job):
     while job.status == "downloading":
         d = job.progress
-        if d and d.get("status") == "finished": text = "✅ آماده‌سازی... 📤"
+        if d and d.get("status") == "finished": text = "✅ دانلود شد، در حال فشرده‌سازی... ⏳"
         elif d:
             eta = d.get("eta")
             if not eta:
@@ -183,7 +184,7 @@ def progress_loop(chat_id, job):
         if text != job.last_text: edit_message(chat_id, job.message_id, text); job.last_text = text
         time.sleep(1)
 
-def run_download(chat_id, url, is_audio_only):
+def run_download(chat_id, url, quality, is_audio_only):
     job = jobs.get(chat_id)
     if not job: return
     def hook(d): job.check(); job.progress = d
@@ -193,14 +194,11 @@ def run_download(chat_id, url, is_audio_only):
 
     opts = {
         "outtmpl": os.path.join(user_dir, "%(id)s.%(ext)s"), 
-        "format": "best",
+        "format": "best", # اول بهترین کیفیت رو دانلود میکنیم
         "quiet": True, "noplaylist": True, "progress_hooks": [hook], "logger": YtdlpLogger(job),
-        "retries": 5, "socket_timeout": 30, "merge_output_format": "mp4",
+        "retries": 5, "socket_timeout": 30,
     }
     
-    if is_audio_only:
-        opts["postprocessors"] = [{"key": "FFmpegExtractAudio", "preferredcodec": "m4a"}]
-
     with DL_SLOTS:
         try:
             with yt_dlp.YoutubeDL(opts) as ydl: info = ydl.extract_info(url, download=True)
@@ -212,24 +210,47 @@ def run_download(chat_id, url, is_audio_only):
     job.status = "finished"
     jobs.pop(chat_id, None)
     
-    files = [os.path.join(user_dir, f) for f in os.listdir(user_dir) if f.startswith(info.get("id")) and f.rsplit(".",1)[-1].lower() in ("mp4","mkv","webm","m4a","mp3","jpg","jpeg","png","webp")]
-    if not files: return send_message(chat_id, "❌ فایل پیدا نشد.")
+    # پیدا کردن فایل دانلود شده
+    downloaded_files = [os.path.join(user_dir, f) for f in os.listdir(user_dir) if f.startswith(info.get("id"))]
+    if not downloaded_files:
+        return send_message(chat_id, "❌ فایل پیدا نشد.")
     
+    original_path = downloaded_files[0]
     job.title = info.get("title", "فایل اینستاگرام")
-    edit_message(chat_id, job.message_id, f"✅ دانلود شد 🎉")
     
-    videos = [p for p in files if p.rsplit(".",1)[-1].lower() in ("mp4","mkv","webm")]
-    audios = [p for p in files if p.rsplit(".",1)[-1].lower() in ("m4a","mp3")]
+    final_path = original_path
+    is_video = True
+
+    # ================= پس‌پردازش با FFmpeg =================
+    if is_audio_only:
+        is_video = False
+        audio_path = original_path.rsplit(".", 1)[0] + ".m4a"
+        edit_message(chat_id, job.message_id, "⏳ در حال استخراج صدا...")
+        subprocess.run(["ffmpeg", "-y", "-i", original_path, "-vn", "-c:a", "aac", "-b:a", "192k", audio_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if os.path.exists(audio_path):
+            final_path = audio_path
+    elif quality != "best":
+        # فشرده‌سازی ویدیو به کیفیت درخواستی
+        compressed_path = original_path.rsplit(".", 1)[0] + f"_{quality}.mp4"
+        edit_message(chat_id, job.message_id, f"⏳ در حال فشرده‌سازی به {quality}...")
+        # دستور ffmpeg برای تغییر سایز (حفظ نسبت تصویر) و کپی کردن صدا
+        cmd = ["ffmpeg", "-y", "-i", original_path, "-vf", f"scale=-2:{quality}", "-c:v", "libx264", "-crf", "28", "-preset", "fast", "-c:a", "copy", compressed_path]
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if os.path.exists(compressed_path):
+            final_path = compressed_path
+    # =======================================================
+
+    edit_message(chat_id, job.message_id, f"✅ دانلود و پردازش شد 🎉")
     
     if is_audio_only:
         send_message(chat_id, f"🎵 **{job.title}**\n\nچطور بفرستم؟", kb=kb_inline_send_choice("audio"))
-        pending_send[chat_id] = {"path": audios[0] if audios else files[0], "title": job.title, "is_video": False, "is_audio": True, "state": "ask_mode"}
-    elif videos:
+        pending_send[chat_id] = {"path": final_path, "title": job.title, "is_video": False, "is_audio": True, "state": "ask_mode"}
+    elif is_video:
         send_message(chat_id, f"🎬 **{job.title}**\n\nچطور بفرستم؟", kb=kb_inline_send_choice("video"))
-        pending_send[chat_id] = {"path": videos[0], "title": job.title, "is_video": True, "is_audio": False, "state": "ask_mode"}
+        pending_send[chat_id] = {"path": final_path, "title": job.title, "is_video": True, "is_audio": False, "state": "ask_mode"}
     else:
         send_message(chat_id, f"🖼 **{job.title}**\n\nچطور بفرستم؟", kb=kb_inline_send_choice("photo"))
-        pending_send[chat_id] = {"path": files[0], "title": job.title, "is_video": False, "is_audio": False, "state": "ask_mode"}
+        pending_send[chat_id] = {"path": final_path, "title": job.title, "is_video": False, "is_audio": False, "state": "ask_mode"}
 
 def handle_callback(cb):
     try:
@@ -244,10 +265,10 @@ def handle_callback(cb):
         if chat_id in pending_links:
             info = pending_links.pop(chat_id); jobs[chat_id] = Job()
             is_audio = (q == "audio")
-            text_start = "⏳ دانلود صدا شروع شد..." if is_audio else "⏳ دانلود ویدیو شروع شد..."
+            text_start = "⏳ دانلود صدا شروع شد..." if is_audio else f"⏳ دانلود ویدیو (کیفیت اصلی) شروع شد..."
             jobs[chat_id].message_id = send_message(chat_id, text_start)
             threading.Thread(target=progress_loop, args=(chat_id, jobs[chat_id]), daemon=True).start()
-            threading.Thread(target=run_download, args=(chat_id, info["url"], is_audio), daemon=True).start()
+            threading.Thread(target=run_download, args=(chat_id, info["url"], q, is_audio), daemon=True).start()
             answer_cb(cb["id"], "شروع دانلود")
     elif data.startswith("qi|"):
         q = data.split("|")[1]
