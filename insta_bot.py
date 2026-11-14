@@ -37,9 +37,10 @@ def get_name(c): return (c.get("first_name") or c.get("username") or "دوست �
 def kb_inline_main_menu():
     return {"inline_keyboard": [[{"text": "📥 ارسال لینک اینستاگرام", "callback_data": "menu_ig"}]]}
 
-# منوی کیفیت (حالا شامل 360، 480، 720، 1080 و صدا)
+# منوی کیفیت (اضافه شدن گزینه کیفیت اصلی)
 def kb_inline_video_quality():
     return {"inline_keyboard": [
+        [{"text": "🌟 کیفیت اصلی (بدون افت)", "callback_data": "qv|best"}],
         [{"text": "🎬 360p", "callback_data": "qv|360"}, {"text": "🎬 480p", "callback_data": "qv|480"}],
         [{"text": "🎬 720p", "callback_data": "qv|720"}, {"text": "🎬 1080p", "callback_data": "qv|1080"}],
         [{"text": "🎵 فقط صدا", "callback_data": "qv|audio"}]
@@ -141,7 +142,7 @@ def fetch_info(chat_id, url, name):
         pending_links[chat_id] = {"url": url, "title": info.get("title", "ویدیوی اینستاگرام"), "thumb_url": info.get("thumbnail")}
         requests.post(f"{API_URL}/deleteMessage", data={"chat_id": chat_id, "message_id": msg_id})
         
-        caption = f"🎬 **{info.get('title', 'ویدیو')}**\n\n👇 کیفیت مورد نظر را انتخاب کنید (سرور کمی زمان برای فشرده‌سازی نیاز دارد):"
+        caption = f"🎬 **{info.get('title', 'ویدیو')}**\n\n👇 کیفیت مورد نظر را انتخاب کنید (برای کیفیت‌های پایین‌تر، سرور زمان برای فشرده‌سازی نیاز دارد):"
         if info.get("thumbnail"): requests.post(f"{API_URL}/sendPhoto", data={"chat_id": chat_id, "photo": info.get("thumbnail"), "caption": caption}, timeout=30)
         else: send_message(chat_id, caption)
         
@@ -173,7 +174,7 @@ def process_image_download(chat_id, url, size_str, label):
 def progress_loop(chat_id, job):
     while job.status == "downloading":
         d = job.progress
-        if d and d.get("status") == "finished": text = "✅ دانلود شد، در حال فشرده‌سازی... ⏳"
+        if d and d.get("status") == "finished": text = "✅ دانلود شد، در حال پردازش... ⏳"
         elif d:
             eta = d.get("eta")
             if not eta:
@@ -194,7 +195,7 @@ def run_download(chat_id, url, quality, is_audio_only):
 
     opts = {
         "outtmpl": os.path.join(user_dir, "%(id)s.%(ext)s"), 
-        "format": "best", # اول بهترین کیفیت رو دانلود میکنیم
+        "format": "best", 
         "quiet": True, "noplaylist": True, "progress_hooks": [hook], "logger": YtdlpLogger(job),
         "retries": 5, "socket_timeout": 30,
     }
@@ -210,7 +211,6 @@ def run_download(chat_id, url, quality, is_audio_only):
     job.status = "finished"
     jobs.pop(chat_id, None)
     
-    # پیدا کردن فایل دانلود شده
     downloaded_files = [os.path.join(user_dir, f) for f in os.listdir(user_dir) if f.startswith(info.get("id"))]
     if not downloaded_files:
         return send_message(chat_id, "❌ فایل پیدا نشد.")
@@ -233,14 +233,13 @@ def run_download(chat_id, url, quality, is_audio_only):
         # فشرده‌سازی ویدیو به کیفیت درخواستی
         compressed_path = original_path.rsplit(".", 1)[0] + f"_{quality}.mp4"
         edit_message(chat_id, job.message_id, f"⏳ در حال فشرده‌سازی به {quality}...")
-        # دستور ffmpeg برای تغییر سایز (حفظ نسبت تصویر) و کپی کردن صدا
         cmd = ["ffmpeg", "-y", "-i", original_path, "-vf", f"scale=-2:{quality}", "-c:v", "libx264", "-crf", "28", "-preset", "fast", "-c:a", "copy", compressed_path]
         subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if os.path.exists(compressed_path):
             final_path = compressed_path
     # =======================================================
 
-    edit_message(chat_id, job.message_id, f"✅ دانلود و پردازش شد 🎉")
+    edit_message(chat_id, job.message_id, f"✅ پردازش تمام شد 🎉")
     
     if is_audio_only:
         send_message(chat_id, f"🎵 **{job.title}**\n\nچطور بفرستم؟", kb=kb_inline_send_choice("audio"))
